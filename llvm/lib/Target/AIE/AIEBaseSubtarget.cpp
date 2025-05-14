@@ -251,6 +251,47 @@ class BiasDepth : public ScheduleDAGMutation {
   };
 };
 
+class SingletonCopyEdges : public ScheduleDAGMutation {
+  void apply(ScheduleDAGInstrs *DAG) override {
+    const MachineRegisterInfo &MRI = DAG->MRI;
+    MachineBasicBlock *MBB = DAG->getBB();
+
+    for (SUnit &SU : DAG->SUnits) {
+      MachineInstr &MI = *SU.getInstr();
+      if (!MI.isCopy())
+        continue;
+
+      auto MO = MI.getOperand(1);
+      if (!(MO.isReg() && MO.getReg().isPhysical()))
+        continue;
+
+      auto PhysReg = MO.getReg();
+      if (!MBB->isLiveIn(PhysReg))
+        continue;
+
+      SDep SingletonCopyEdge(&SU, SDep::Artificial);
+
+      for (SUnit &SU2 : DAG->SUnits) {
+        MachineInstr &MI = *SU2.getInstr();
+
+        if (any_of(MI.defs(), [=, &MRI](const MachineOperand &MO) {
+              if (!MO.isReg() || MO.getReg().isPhysical())
+                return false;
+              auto RC = MRI.getRegClass(MO.getReg());
+              // a def with a singleton register class containing PhysReg from
+              // the Copy
+              if (RC->getNumRegs() == 1 && RC->contains(PhysReg))
+                return true;
+              return false;
+            })) {
+          SingletonCopyEdge.setLatency(0);
+          SU2.addPred(SingletonCopyEdge, /*Required=*/true);
+        }
+      }
+    }
+  };
+};
+
 class RegionEndEdges : public ScheduleDAGMutation {
   void removeExitSUPreds(ScheduleDAGInstrs *DAG) {
     SUnit &ExitSU = DAG->ExitSU;
@@ -856,6 +897,7 @@ AIEBaseSubtarget::getPreRAMutationsImpl(const Triple &TT) {
     Mutations.emplace_back(std::make_unique<PropagateIncomingLatencies>());
   if (EnableStrongCopyEdges)
     Mutations.emplace_back(std::make_unique<EnforceCopyEdges>());
+  Mutations.emplace_back(std::make_unique<SingletonCopyEdges>());
   return Mutations;
 }
 
