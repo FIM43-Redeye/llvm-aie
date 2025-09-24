@@ -18,6 +18,7 @@
 #include "MCTargetDesc/AIE2MCTargetDesc.h"
 #include "MCTargetDesc/AIEMCTargetDesc.h"
 #include "MCTargetDesc/aie2p/AIE2PMCTargetDesc.h"
+#include "llvm/IR/RuntimeLibcalls.h"
 #include "llvm/MC/MCRegister.h"
 using namespace llvm;
 
