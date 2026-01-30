@@ -2,7 +2,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# (c) Copyright 2025 Advanced Micro Devices, Inc. or its affiliates
+# (c) Copyright 2025-2026 Advanced Micro Devices, Inc. or its affiliates
 
 # RUN: llc -verify-machineinstrs --mtriple=aie2p -O2 \
 # RUN:   --start-before=postmisched %s \
@@ -54,7 +54,7 @@
   ; CHECK-NEXT: Name:            schedule
   ; CHECK-NEXT: Function:        gemm_lowitercount
   ; CHECK-NEXT: Args:
-  ; CHECK-NEXT:   - String:          No schedule found.
+  ; CHECK-NEXT:   - String:          No schedule found with register allocation.
   ; CHECK-NEXT: ...
   entry:
     %cmp5 = icmp sgt i32 %n, 0
