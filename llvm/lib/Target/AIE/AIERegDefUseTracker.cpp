@@ -68,23 +68,6 @@ unsigned RegLiveRangeTracker::getSubRegIndex(MCRegister AccessReg,
   return 0;
 }
 
-void RegLiveRangeTracker::computeAliasClosure(MCRegister Reg,
-                                              DenseSet<MCRegister> &Out) const {
-  Out.insert(Reg);
-
-  // Add all sub-registers
-  for (MCSubRegIterator SubRegIt(Reg, TRI, /*IncludeSelf=*/false);
-       SubRegIt.isValid(); ++SubRegIt) {
-    Out.insert(*SubRegIt);
-  }
-
-  // Add all super-registers
-  for (MCSuperRegIterator SuperRegIt(Reg, TRI, /*IncludeSelf=*/false);
-       SuperRegIt.isValid(); ++SuperRegIt) {
-    Out.insert(*SuperRegIt);
-  }
-}
-
 bool RegLiveRangeTracker::overlapsAnyInSet(
     MCRegister Reg, const DenseSet<MCRegister> &RegSet) const {
   for (MCRegister R : RegSet) {
@@ -95,18 +78,10 @@ bool RegLiveRangeTracker::overlapsAnyInSet(
 }
 
 bool RegLiveRangeTracker::isCarriedByLiveInOut(
-    const RegLiveRange &LR, const DenseSet<MCRegister> &LiveInAliases,
-    const DenseSet<MCRegister> &LiveOutAliases) const {
-  for (const auto &Def : LR.defs()) {
-    MCRegister R = Def.getOperand()->getReg().asMCReg();
-    if (overlapsAnyInSet(R, LiveInAliases) ||
-        overlapsAnyInSet(R, LiveOutAliases))
-      return true;
-  }
-  for (const auto &Use : LR.uses()) {
-    MCRegister R = Use.getOperand()->getReg().asMCReg();
-    if (overlapsAnyInSet(R, LiveInAliases) ||
-        overlapsAnyInSet(R, LiveOutAliases))
+    const RegLiveRange &LR, const DenseSet<MCRegister> &ExcludedRegs) const {
+  for (const auto &Op : LR.operands()) {
+    const MCRegister R = Op.getOperand()->getReg().asMCReg();
+    if (overlapsAnyInSet(R, ExcludedRegs))
       return true;
   }
   return false;
@@ -450,16 +425,15 @@ void RegLiveRangeTracker::analyze(MachineBasicBlock &MBB,
                                    "is unreliable after scheduling");
   clear();
 
-  // Build live-in and live-out alias closures
-  DenseSet<MCRegister> LiveInAliases;
+  // Collect excluded registers (live-in and live-out combined)
+  DenseSet<MCRegister> ExcludedRegs;
   for (const auto &LI : MBB.liveins()) {
-    computeAliasClosure(LI.PhysReg, LiveInAliases);
+    ExcludedRegs.insert(LI.PhysReg);
   }
 
-  DenseSet<MCRegister> LiveOutAliases;
   for (MachineBasicBlock *Succ : MBB.successors()) {
     for (const auto &LI : Succ->liveins()) {
-      computeAliasClosure(LI.PhysReg, LiveOutAliases);
+      ExcludedRegs.insert(LI.PhysReg);
     }
   }
 
@@ -606,7 +580,7 @@ void RegLiveRangeTracker::analyze(MachineBasicBlock &MBB,
     }
 
     // Filter out ranges carried by live-in/live-out registers
-    if (isCarriedByLiveInOut(LR, LiveInAliases, LiveOutAliases)) {
+    if (isCarriedByLiveInOut(LR, ExcludedRegs)) {
       DEBUG_WITH_TYPE(DEBUG_TYPE, dbgs() << "  Filtered: live-in/out\n");
       continue;
     }

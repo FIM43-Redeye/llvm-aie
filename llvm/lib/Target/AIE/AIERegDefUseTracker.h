@@ -155,9 +155,6 @@ class RegLiveRangeTracker {
   /// Returns 0 if AccessReg is not a sub-register of BaseReg
   unsigned getSubRegIndex(MCRegister AccessReg, MCRegister BaseReg) const;
 
-  /// Compute the alias closure for a register (includes sub and super regs)
-  void computeAliasClosure(MCRegister Reg, DenseSet<MCRegister> &Out) const;
-
   /// Check if a register overlaps with any register in a set
   bool overlapsAnyInSet(MCRegister Reg,
                         const DenseSet<MCRegister> &RegSet) const;
@@ -167,8 +164,7 @@ class RegLiveRangeTracker {
 
   /// First-stage safety filtering
   bool isCarriedByLiveInOut(const RegLiveRange &LR,
-                            const DenseSet<MCRegister> &LiveInAliases,
-                            const DenseSet<MCRegister> &LiveOutAliases) const;
+                            const DenseSet<MCRegister> &ExcludedRegs) const;
   bool startsWithDefInBlock(const RegLiveRange &LR) const;
   bool hasTiedOperands(const RegLiveRange &LR) const;
 
