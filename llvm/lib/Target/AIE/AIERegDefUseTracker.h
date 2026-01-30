@@ -79,8 +79,8 @@ class RegLiveRange {
 public:
   RegLiveRange() = default;
 
-  void addDef(MachineOperand *DefOp, unsigned SubRegIdx = 0);
-  void addUse(MachineOperand *UseOp, unsigned SubRegIdx = 0);
+  void addDef(MachineOperand *DefOp, unsigned SubRegIdx);
+  void addUse(MachineOperand *UseOp, unsigned SubRegIdx);
 
   /// Get the number of definitions
   size_t getNumDefs() const { return Defs.size(); }
@@ -98,9 +98,6 @@ public:
   auto operands() const {
     return llvm::concat<const RegOperandInfo>(Uses, Defs);
   }
-
-  /// Merge another live range into this one
-  void merge(const RegLiveRange &Other);
 
   /// Get the base register for this live range
   MCRegister getBaseReg() const { return BaseReg; }

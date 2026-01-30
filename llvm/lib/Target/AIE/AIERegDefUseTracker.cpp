@@ -50,11 +50,6 @@ void RegLiveRange::addUse(MachineOperand *UseOp, unsigned SubRegIdx) {
   Uses.emplace_back(UseOp, SubRegIdx);
 }
 
-void RegLiveRange::merge(const RegLiveRange &Other) {
-  Defs.append(Other.Defs);
-  Uses.append(Other.Uses);
-}
-
 /// Get the sub-register index if AccessReg is a sub-register of BaseReg
 /// Returns 0 if AccessReg is not a sub-register of BaseReg
 unsigned RegLiveRangeTracker::getSubRegIndex(MCRegister AccessReg,
