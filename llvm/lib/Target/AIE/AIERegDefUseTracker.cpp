@@ -571,9 +571,7 @@ void RegLiveRangeTracker::analyze(MachineBasicBlock &MBB,
       return ImplicitRegs.count(Reg) > 0;
     };
 
-    if (llvm::any_of(LR.defs(), UsesImplicitReg) ||
-        llvm::any_of(LR.uses(), UsesImplicitReg)) {
-
+    if (llvm::any_of(LR.operands(), UsesImplicitReg)) {
       DEBUG_WITH_TYPE(DEBUG_TYPE,
                       dbgs() << "  Filtered: uses implicit register\n");
       continue;
@@ -1057,13 +1055,8 @@ RegLiveRangeTracker::findMostPromisingScarceRanges(
   auto HasOverlap = [](const std::vector<const RegLiveRange *> &Ranges) {
     DenseSet<const MachineInstr *> SeenInstrs;
     for (const RegLiveRange *LR : Ranges) {
-      for (const auto &DefInfo : LR->defs()) {
-        if (!SeenInstrs.insert(DefInfo.getOperand()->getParent()).second) {
-          return true;
-        }
-      }
-      for (const auto &UseInfo : LR->uses()) {
-        if (!SeenInstrs.insert(UseInfo.getOperand()->getParent()).second) {
+      for (const auto &Info : LR->operands()) {
+        if (!SeenInstrs.insert(Info.getOperand()->getParent()).second) {
           return true;
         }
       }

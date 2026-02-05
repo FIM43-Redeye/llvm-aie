@@ -639,15 +639,17 @@ void dumpGraph(const ScheduleInfo &Info, ScheduleDAGInstrs *DAG) {
   dbgs() << "digraph {\n";
   const auto *TRI = DAG->MF.getSubtarget().getRegisterInfo();
 
-  // Prescan backedge destinations and declare them to have a different shape.
-  for (int K = 0; K < Info.NInstr; K++) {
-    int K2 = K + Info.NInstr;
-    auto &SU = DAG->SUnits[K2];
-    if (any_of(SU.Preds, [Limit = Info.NInstr, K](const SDep &Dep) {
-          int P = Dep.getSUnit()->NodeNum;
-          return P < Limit && P != K;
-        })) {
-      dbgs() << "\tSU" << K2 << "_" << K << "[shape=rectangle]\n";
+  if (DAG->SUnits.size() > unsigned(Info.NInstr)) {
+    // Prescan backedge destinations and declare them to have a different shape.
+    for (int K = 0; K < Info.NInstr; K++) {
+      const int K2 = K + Info.NInstr;
+      auto &SU = DAG->SUnits[K2];
+      if (any_of(SU.Preds, [Limit = Info.NInstr, K](const SDep &Dep) {
+            const int P = Dep.getSUnit()->NodeNum;
+            return P < Limit && P != K;
+          })) {
+        dbgs() << "\tSU" << K2 << "_" << K << "[shape=rectangle]\n";
+      }
     }
   }
 
@@ -989,6 +991,8 @@ bool reportLatencyMismatches(const DataDependenceHelper &VerifyDAG,
 }
 
 >>>>>>> 05164a4c0f97 (Virtual pipeliner mode integration)
+=======
+>>>>>>> e67be2f1b192 (More thorough latency check)
 } // namespace
 
 bool PostPipeliner::scheduleOtherIterations(PostPipelinerStrategy &Strategy) {
@@ -1715,61 +1719,30 @@ bool PostPipeliner::verifyLatenciesAfterRegAlloc() {
   // Now rebuild edges with exact latencies based on physical registers.
   VerifyDAG.buildEdges();
 
-  // Build a map of data edges that existed in the original virtual DAG.
-  // We only check these edges to avoid false positives from order-based
-  // dependencies that are artifacts of instruction ordering.
-  DenseSet<std::pair<int, int>> OriginalDataEdges;
-  for (int K = 0; K < NInstr; K++) {
-    const SUnit &OrigSU = DAG->SUnits[K];
-    for (const SDep &Dep : OrigSU.Preds) {
-      if (Dep.getKind() != SDep::Data) {
-        continue;
-      }
-      const int PredNum = Dep.getSUnit()->NodeNum;
-      if (PredNum < NInstr) {
-        OriginalDataEdges.insert({PredNum, K});
-      }
-    }
-  }
-
-  // Compute earliest times based on the new DAG with physical registers.
-  // Only consider data edges that existed in the original virtual DAG.
-  std::vector<int> ComputedEarliest(NInstr, 0);
-  for (int K = 0; K < NInstr; K++) {
-    if (K >= static_cast<int>(VerifyDAG.SUnits.size())) {
-      break;
-    }
-    const SUnit &SU = VerifyDAG.SUnits[K];
-    int Earliest = 0;
+  // And validate the schedule using physical registers
+  bool Verdict = true;
+  for (auto &SU : VerifyDAG.SUnits) {
+    const int Cycle = Info[SU.NodeNum].Cycle;
     for (const SDep &Dep : SU.Preds) {
-      const int PredNum = Dep.getSUnit()->NodeNum;
-      if (PredNum >= NInstr) {
-        continue;
-      }
-
-      // Only check edges that existed in the original virtual DAG.
-      if (!OriginalDataEdges.count({PredNum, K})) {
-        continue;
-      }
-
-      const int PredCycle = Info[PredNum].Cycle;
+      const auto *Pred = Dep.getSUnit();
+      const int PCycle = Info[Pred->NodeNum].Cycle;
       const int Latency = Dep.getSignedLatency();
-      Earliest = std::max(Earliest, PredCycle + Latency);
+
+      if (Cycle < PCycle + Latency) {
+        LLVM_DEBUG(dbgs() << "Latency violation: "
+                          << "SU" << Pred->NodeNum << " @ " << PCycle << " + "
+                          << Latency << " > "
+                          << "SU" << SU.NodeNum << " @ " << Cycle << "\n");
+        Verdict = false;
+      }
     }
-    ComputedEarliest[K] = Earliest;
   }
 
-  // Report all instructions and check for mismatches.
-  const bool HasMismatch =
-      reportLatencyMismatches(VerifyDAG, Info, ComputedEarliest, NInstr);
-
-  if (HasMismatch) {
-    LLVM_DEBUG(dbgs() << "=== Latency Verification FAILED ===\n\n");
-  } else {
-    LLVM_DEBUG(dbgs() << "=== Latency Verification PASSED ===\n\n");
+  if (!Verdict) {
+    LLVM_DEBUG(dbgs() << "Physreg Graph:\n");
+    dumpGraph(Info, &VerifyDAG);
   }
-
-  return !HasMismatch;
+  return Verdict;
 }
 
 // Pipelining reduces the iteration count by NS - 1
