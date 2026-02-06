@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AIEPostRegAlloc.h"
-#include "AIELaneMaskVector.h"
+#include "AIELivenessVector.h"
 #include "AIERegDefUseTracker.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -32,7 +32,7 @@ using namespace llvm::AIE;
 // Initialize allocation state and compute interference graphs.
 void AIEPostRegAlloc::AllocState::init(
     const TargetRegisterInfo *InTRI,
-    const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVReg,
+    const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVReg,
     const DenseSet<MCRegister> &AvailableRegs, const MachineRegisterInfo &MRI) {
   this->RegUnitOccupancy.clear();
   this->PhysOccupancy.clear();
@@ -61,7 +61,7 @@ void AIEPostRegAlloc::AllocState::init(
 
 // Check if VReg can be placed in PhysReg without conflicts.
 bool AIEPostRegAlloc::AllocState::canPlace(
-    unsigned VReg, Register PhysReg, const AIE::LaneMaskVector &VRegMasks,
+    unsigned VReg, Register PhysReg, const AIE::LivenessVector &VRegMasks,
     const TargetRegisterClass *RC) const {
 
   // Check RegUnit conflicts - this handles aliasing automatically.
@@ -88,7 +88,7 @@ bool AIEPostRegAlloc::AllocState::canPlace(
 
 // Place VReg in PhysReg (updates occupancy).
 void AIEPostRegAlloc::AllocState::place(unsigned VReg, Register PhysReg,
-                                        const AIE::LaneMaskVector &VRegMasks,
+                                        const AIE::LivenessVector &VRegMasks,
                                         const TargetRegisterClass *RC) {
 
   // Update lane mask occupancy for the specific register (for compatibility).
@@ -164,7 +164,7 @@ AIEPostRegAlloc::buildRCInterferenceGraph(const DenseSet<unsigned> &UsedRCIds,
 // Build virtual register interference graph (symmetric).
 AIEPostRegAlloc::WeightedSymmetricGraph
 AIEPostRegAlloc::buildVRegInterferenceGraph(
-    const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVReg,
+    const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVReg,
     const MachineRegisterInfo &MRI,
     const WeightedAsymmetricGraph &RCInterferenceGraph) {
 
@@ -204,16 +204,16 @@ AIEPostRegAlloc::buildVRegInterferenceGraph(
 
 // Compute metrics for a virtual register.
 AIEPostRegAlloc::VRegMetrics AIEPostRegAlloc::computeMetrics(
-    unsigned VReg, const AIE::LaneMaskVector &Masks,
+    unsigned VReg, const AIE::LivenessVector &Masks,
     const WeightedSymmetricGraph &VRegInterferenceGraph,
-    const DenseMap<unsigned, AIE::LaneMaskVector> &AllVRegs,
+    const DenseMap<unsigned, AIE::LivenessVector> &AllVRegs,
     const WeightedAsymmetricGraph &RCInterferenceGraph,
     const DenseSet<MCRegister> &AvailableRegs, const MachineRegisterInfo &MRI,
     const TargetRegisterInfo &TRI) {
   VRegMetrics Metrics = {0, 0, 0, 0, 0, 0};
 
   // Compute basic metrics.
-  for (const auto &Mask : Masks.getMasks()) {
+  for (const auto &Mask : Masks.getElements()) {
     if (Mask.any()) {
       unsigned LanesInCycle = Mask.getNumLanes();
       Metrics.TotalLanes += LanesInCycle;
@@ -283,7 +283,7 @@ std::vector<Register> AIEPostRegAlloc::getCandidatePhysRegs(
 
 // Try to allocate using a specific scoring function for ordering.
 AIEPostRegAlloc::AllocResult AIEPostRegAlloc::tryAllocate(
-    const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVReg,
+    const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVReg,
     const DenseSet<MCRegister> &AvailableRegs, const TargetRegisterInfo &TRI,
     const MachineRegisterInfo &MRI, AllocState &State, ScoringFunction ScoreFn,
     DenseMap<Register, MCRegister> &OutAssign) {
@@ -297,7 +297,7 @@ AIEPostRegAlloc::AllocResult AIEPostRegAlloc::tryAllocate(
   struct VRegInfo {
     unsigned VReg;
     unsigned Score;
-    const AIE::LaneMaskVector *Masks;
+    const AIE::LivenessVector *Masks;
     const TargetRegisterClass *RC;
   };
 
@@ -480,7 +480,7 @@ void AIEPostRegAlloc::dumpVRegMetrics(
 
 // Main allocation entry point.
 bool AIEPostRegAlloc::allocate(
-    const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVReg, int II,
+    const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVReg, int II,
     RegLiveRangeTracker &RegTracker, const MachineFunction &MF,
     const TargetRegisterInfo &TRI, const MachineRegisterInfo &MRI,
     DenseMap<Register, MCRegister> &OutAssign) {
