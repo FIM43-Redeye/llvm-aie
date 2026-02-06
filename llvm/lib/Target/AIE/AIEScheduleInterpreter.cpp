@@ -16,7 +16,7 @@
 
 #include "AIEScheduleInterpreter.h"
 #include "AIEBaseInstrInfo.h"
-#include "AIELaneMaskVector.h"
+#include "AIELivenessVector.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -51,44 +51,24 @@ AIEScheduleInterpreter::AIEScheduleInterpreter(const MachineFunction &MF)
          "Instruction itinerary data must be provided");
 }
 
-int AIEScheduleInterpreter::getOperandCycle(const MachineInstr &MI,
+int AIEScheduleInterpreter::getOperandCycle(unsigned SchedClass,
                                             unsigned OpIdx) const {
-
-  assert(OpIdx < MI.getNumOperands() && "OpIdx out of bounds");
-
-  // Get the instruction's scheduling class
-  const MCInstrDesc &Desc = MI.getDesc();
-  unsigned SchedClass = Desc.getSchedClass();
-
-  // Get operand cycle from itinerary
-  // This tells us when the operand is read relative to instruction issue
-  std::optional<unsigned> OperandCycle =
+  // Get operand cycle from itinerary.
+  // This tells us when the operand is accessed relative to instruction issue.
+  const std::optional<unsigned> OperandCycle =
       Itin->getOperandCycle(SchedClass, OpIdx);
 
-  // Ensure we have timing information for this operand
+  // Ensure we have timing information for this operand.
   assert(OperandCycle.has_value() &&
          "Itinerary must provide operand cycle information for all operands");
 
   return *OperandCycle;
 }
 
-unsigned AIEScheduleInterpreter::getOperandSubRegIdx(const MachineInstr &MI,
-                                                     unsigned OpIdx) const {
-
-  if (OpIdx >= MI.getNumOperands())
-    return 0;
-
-  const MachineOperand &MO = MI.getOperand(OpIdx);
-  if (!MO.isReg())
-    return 0;
-
-  // Return the subregister index if present
-  return MO.getSubReg();
-}
-
 // Helper to add an event to the schedule, resizing if necessary
 static void addEvent(EventSchedule &Schedule, int Cycle, EventType Type,
-                     unsigned VReg, unsigned SubRegIdx, const MachineInstr *MI,
+                     unsigned VReg, unsigned SubRegIdx,
+                     unsigned ForwardingClass, const MachineInstr *MI,
                      unsigned OpIdx) {
   // Ensure the schedule is large enough
   if (Cycle >= static_cast<int>(Schedule.size())) {
@@ -96,7 +76,8 @@ static void addEvent(EventSchedule &Schedule, int Cycle, EventType Type,
   }
 
   // Add the event
-  Schedule[Cycle].emplace_back(Type, VReg, SubRegIdx, MI, OpIdx);
+  Schedule[Cycle].emplace_back(Type, VReg, SubRegIdx, ForwardingClass, MI,
+                               OpIdx);
 }
 
 void AIEScheduleInterpreter::addInstructionEvents(
@@ -104,6 +85,10 @@ void AIEScheduleInterpreter::addInstructionEvents(
 
   LLVM_DEBUG(dbgs() << "Adding events for instruction at cycle " << IssueCycle
                     << ": " << MI);
+
+  // Get scheduling class once for all operands.
+  const MCInstrDesc &Desc = MI.getDesc();
+  const unsigned SchedClass = Desc.getSchedClass();
 
   // Process all operands
   for (unsigned OpIdx = 0; OpIdx < MI.getNumOperands(); ++OpIdx) {
@@ -121,35 +106,47 @@ void AIEScheduleInterpreter::addInstructionEvents(
     if (MO.isImplicit())
       continue;
 
-    Register VReg = MO.getReg();
-    unsigned SubRegIdx = getOperandSubRegIdx(MI, OpIdx);
+    const Register VReg = MO.getReg();
+    const unsigned SubRegIdx = MO.getSubReg();
+    const unsigned ForwardingClass =
+        Itin->getForwardingClass(SchedClass, OpIdx);
 
     if (MO.isUse()) {
-      int ReadCycleOffset = getOperandCycle(MI, OpIdx);
-      int ReadCycle = IssueCycle + ReadCycleOffset;
+      const int ReadCycleOffset = getOperandCycle(SchedClass, OpIdx);
+      const int ReadCycle = IssueCycle + ReadCycleOffset;
 
-      // Add read event
-      addEvent(Schedule, ReadCycle, EventType::Read, VReg, SubRegIdx, &MI,
-               OpIdx);
+      // Add read event.
+      // ForwardingClass != 0 indicates this read also accesses a bypass
+      // one cycle earlier.
+      addEvent(Schedule, ReadCycle, EventType::Read, VReg, SubRegIdx,
+               ForwardingClass, &MI, OpIdx);
 
       LLVM_DEBUG(dbgs() << "  Read %vreg" << Register::virtReg2Index(VReg);
                  if (SubRegIdx) dbgs()
                  << ":" << TRI.getSubRegIndexName(SubRegIdx);
-                 dbgs() << " at cycle " << ReadCycle << "\n");
+                 dbgs() << " at cycle " << ReadCycle;
+                 if (ForwardingClass) dbgs()
+                 << " (forwarding class " << ForwardingClass << ")";
+                 dbgs() << "\n");
     }
 
     if (MO.isDef()) {
-      int WriteCycleOffset = getOperandCycle(MI, OpIdx);
-      int WriteCycle = IssueCycle + WriteCycleOffset;
+      const int WriteCycleOffset = getOperandCycle(SchedClass, OpIdx);
+      const int WriteCycle = IssueCycle + WriteCycleOffset;
 
-      // Add write event
-      addEvent(Schedule, WriteCycle, EventType::Write, VReg, SubRegIdx, &MI,
-               OpIdx);
+      // Add write event.
+      // ForwardingClass != 0 indicates this write also writes to a bypass
+      // at the same cycle.
+      addEvent(Schedule, WriteCycle, EventType::Write, VReg, SubRegIdx,
+               ForwardingClass, &MI, OpIdx);
 
       LLVM_DEBUG(dbgs() << "  Write %vreg" << Register::virtReg2Index(VReg);
                  if (SubRegIdx) dbgs()
                  << ":" << TRI.getSubRegIndexName(SubRegIdx);
-                 dbgs() << " at cycle " << WriteCycle << "\n");
+                 dbgs() << " at cycle " << WriteCycle;
+                 if (ForwardingClass) dbgs()
+                 << " (forwarding class " << ForwardingClass << ")";
+                 dbgs() << "\n");
     }
   }
 }
@@ -165,27 +162,48 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
     }
   }
 
-  // Build a map of events per VReg
-  std::map<unsigned, std::map<unsigned, std::string>> EventsByVReg;
+  // Helper lambda to format an event as a string
+  auto formatEvent = [](const RFEvent &Event) -> std::string {
+    const char Action = (Event.Type == EventType::Read) ? 'R' : 'W';
+    std::string ActionStr;
+    if (Event.SubRegIdx != 0) {
+      // Include subreg info if present (format as R## or W##)
+      raw_string_ostream Stream(ActionStr);
+      Stream << format("%c%02d", Action, Event.SubRegIdx);
+    } else {
+      // No subreg, just the action with padding
+      ActionStr = Action;
+      ActionStr += "  ";
+    }
+    return ActionStr;
+  };
+
+  // Build separate maps for register and bypass events per VReg.
+  // Bypass events are derived from ForwardingClass:
+  // - Reads with ForwardingClass != 0 also read bypass one cycle earlier
+  // - Writes with ForwardingClass != 0 also write bypass at same cycle
+  std::map<unsigned, std::map<unsigned, std::string>> RegEventsByVReg;
+  std::map<unsigned, std::map<unsigned, std::string>> BypassEventsByVReg;
   for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
     const auto &CycleEvents = Schedule[Cycle];
     for (const auto &Event : CycleEvents) {
-      char Action = (Event.Type == EventType::Read) ? 'R' : 'W';
-      std::string ActionStr;
-      if (Event.SubRegIdx != 0) {
-        // Include subreg info if present (format as R## or W##)
-        raw_string_ostream Stream(ActionStr);
-        Stream << format("%c%02d", Action, Event.SubRegIdx);
-      } else {
-        // No subreg, just the action with padding
-        ActionStr = Action;
-        ActionStr += "  ";
-      }
       // Add space if there's already an event in this cycle
-      if (!EventsByVReg[Event.VReg][Cycle].empty()) {
-        EventsByVReg[Event.VReg][Cycle] += " ";
+      if (!RegEventsByVReg[Event.VReg][Cycle].empty()) {
+        RegEventsByVReg[Event.VReg][Cycle] += " ";
       }
-      EventsByVReg[Event.VReg][Cycle] += ActionStr;
+      RegEventsByVReg[Event.VReg][Cycle] += formatEvent(Event);
+
+      // If this event uses a bypass, add bypass event
+      if (Event.ForwardingClass != 0) {
+        const int BypassCycle =
+            (Event.Type == EventType::Read) ? Cycle - 1 : Cycle;
+        if (BypassCycle >= 0) {
+          if (!BypassEventsByVReg[Event.VReg][BypassCycle].empty()) {
+            BypassEventsByVReg[Event.VReg][BypassCycle] += " ";
+          }
+          BypassEventsByVReg[Event.VReg][BypassCycle] += formatEvent(Event);
+        }
+      }
     }
   }
 
@@ -203,20 +221,31 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   }
   OS << "\n";
 
-  // Print each VReg row
-  for (unsigned VReg : AllVRegs) {
-    OS << format("%6d |", Register::virtReg2Index(VReg));
-
-    const auto &VRegEvents = EventsByVReg[VReg];
+  // Helper lambda to print a row of events
+  auto printEventRow = [&](const std::map<unsigned, std::string> &Events) {
     for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
-      auto It = VRegEvents.find(Cycle);
-      if (It != VRegEvents.end()) {
+      auto It = Events.find(Cycle);
+      if (It != Events.end()) {
         OS << format(" %-4s |", It->second.c_str());
       } else {
         OS << "      |";
       }
     }
     OS << "\n";
+  };
+
+  // Print each VReg with register events and bypass events on separate lines
+  for (unsigned VReg : AllVRegs) {
+    // Print register events
+    OS << format("%6d |", Register::virtReg2Index(VReg));
+    printEventRow(RegEventsByVReg[VReg]);
+
+    // Print bypass events if any exist for this VReg
+    const auto &BypassEvents = BypassEventsByVReg[VReg];
+    if (!BypassEvents.empty()) {
+      OS << "   (b) |";
+      printEventRow(BypassEvents);
+    }
   }
 }
 
@@ -233,13 +262,13 @@ static LaneBitmask getLaneMaskFor(const TargetRegisterInfo &TRI,
   return TRI.getSubRegIndexLaneMask(SubRegIdx);
 }
 
-DenseMap<unsigned, AIE::LaneMaskVector>
+DenseMap<unsigned, AIE::LivenessVector>
 AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
                                        int II) const {
 
   assert(II > 0 && "Initiation interval must be positive");
 
-  DenseMap<unsigned, AIE::LaneMaskVector> LiveLanesByVirtReg;
+  DenseMap<unsigned, AIE::LivenessVector> LiveLanesByVirtReg;
 
   if (Schedule.empty())
     return LiveLanesByVirtReg;
@@ -259,7 +288,7 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
       if (Mask.any()) {
         // Ensure the output vector is sized for this VReg
         if (!LiveLanesByVirtReg.count(VReg)) {
-          LiveLanesByVirtReg[VReg] = AIE::LaneMaskVector(II);
+          LiveLanesByVirtReg[VReg] = AIE::LivenessVector(II);
         }
         LiveLanesByVirtReg[VReg][ModuloCycle] |= Mask;
 
@@ -282,11 +311,21 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
 
         // Ensure the output vector exists for this VReg
         if (!LiveLanesByVirtReg.count(Event.VReg)) {
-          LiveLanesByVirtReg[Event.VReg] = AIE::LaneMaskVector(II);
+          LiveLanesByVirtReg[Event.VReg] = AIE::LivenessVector(II);
         }
 
         // RF write occupies register file at ModuloCycle
         LiveLanesByVirtReg[Event.VReg][ModuloCycle] |= M;
+
+        // If this write uses a bypass, mark bypass write at same cycle
+        if (Event.ForwardingClass != 0) {
+          LiveLanesByVirtReg[Event.VReg][ModuloCycle].addBypassWrite(
+              Event.ForwardingClass);
+
+          LLVM_DEBUG(dbgs() << "    Bypass write of class "
+                            << Event.ForwardingClass << " at cycle " << C
+                            << " (offset " << ModuloCycle << ")\n");
+        }
 
         // Kill those lanes going backward
         ActiveMask[Event.VReg] &= ~M;
@@ -320,6 +359,24 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
                    if (Event.SubRegIdx) dbgs()
                    << ":" << TRI.getSubRegIndexName(Event.SubRegIdx);
                    dbgs() << " lanes " << PrintLaneMask(M) << "\n");
+
+        // If this read uses a bypass, mark bypass read one cycle earlier
+        if (Event.ForwardingClass != 0) {
+          const int BypassReadCycle = C - 1;
+          if (BypassReadCycle >= 0) {
+            const int BypassModuloCycle = BypassReadCycle % II;
+            if (!LiveLanesByVirtReg.count(Event.VReg)) {
+              LiveLanesByVirtReg[Event.VReg] = AIE::LivenessVector(II);
+            }
+            LiveLanesByVirtReg[Event.VReg][BypassModuloCycle].addBypassRead(
+                Event.ForwardingClass);
+
+            LLVM_DEBUG(dbgs()
+                       << "    Bypass read of class " << Event.ForwardingClass
+                       << " at cycle " << BypassReadCycle << " (offset "
+                       << BypassModuloCycle << ")\n");
+          }
+        }
       }
     }
 
@@ -351,7 +408,7 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
 }
 
 void AIEScheduleInterpreter::dumpLiveLanes(
-    const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVirtReg, int II,
+    const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVirtReg, int II,
     raw_ostream &OS) const {
 
   if (LiveLanesByVirtReg.empty()) {

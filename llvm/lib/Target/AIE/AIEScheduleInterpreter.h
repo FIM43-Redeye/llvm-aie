@@ -18,7 +18,7 @@
 #ifndef LLVM_LIB_TARGET_AIE_AIESCHEDULEINTERPRETER_H
 #define LLVM_LIB_TARGET_AIE_AIESCHEDULEINTERPRETER_H
 
-#include "AIELaneMaskVector.h"
+#include "AIELivenessVector.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
@@ -80,12 +80,13 @@ struct RFEvent {
   EventType Type;         // Read or Write
   unsigned VReg;          // Virtual register
   unsigned SubRegIdx;     // Subregister index (0 for full register)
+  unsigned ForwardingClass; // Forwarding/bypass class (0 = no bypass)
   const MachineInstr *MI; // Source instruction
   unsigned OpIdx;         // Operand index
 
-  RFEvent(EventType T, unsigned V, unsigned S, const MachineInstr *M,
-          unsigned O)
-      : Type(T), VReg(V), SubRegIdx(S), MI(M), OpIdx(O) {}
+  RFEvent(EventType T, unsigned V, unsigned S, unsigned F,
+          const MachineInstr *M, unsigned O)
+      : Type(T), VReg(V), SubRegIdx(S), ForwardingClass(F), MI(M), OpIdx(O) {}
 };
 
 /// Event schedule indexed by cycle
@@ -98,12 +99,9 @@ class AIEScheduleInterpreter {
   const MachineRegisterInfo &MRI;
   const InstrItineraryData *Itin;
 
-  /// Get the cycle offset when an operand is accessed
+  /// Get the cycle offset when an operand is accessed given a scheduling class
   /// Returns the offset from issue cycle
-  int getOperandCycle(const MachineInstr &MI, unsigned OpIdx) const;
-
-  /// Get the subregister index for an operand
-  unsigned getOperandSubRegIdx(const MachineInstr &MI, unsigned OpIdx) const;
+  int getOperandCycle(unsigned SchedClass, unsigned OpIdx) const;
 
 public:
   explicit AIEScheduleInterpreter(const MachineFunction &MF);
@@ -139,7 +137,7 @@ public:
   /// \param Schedule The event schedule to analyze
   /// \param II The initiation interval for modulo scheduling
   /// \return Map of VReg to per-offset lane masks
-  DenseMap<unsigned, AIE::LaneMaskVector>
+  DenseMap<unsigned, AIE::LivenessVector>
   buildLiveLanes(const EventSchedule &Schedule, int II) const;
 
   /// Dump the live lanes in a readable format
@@ -148,7 +146,7 @@ public:
   /// \param II The initiation interval
   /// \param OS Output stream to write to
   void dumpLiveLanes(
-      const DenseMap<unsigned, AIE::LaneMaskVector> &LiveLanesByVirtReg, int II,
+      const DenseMap<unsigned, AIE::LivenessVector> &LiveLanesByVirtReg, int II,
       raw_ostream &OS) const;
 
   /// Convert lane masks to a BitVector for a specific subregister
