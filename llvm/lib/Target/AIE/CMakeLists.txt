@@ -101,7 +101,7 @@ add_llvm_target(AIECodeGen
    AIEHazardRecognizer.cpp
    AIEInterBlockScheduling.cpp
    AIEISelDAGToDAG.cpp
-   AIELaneMaskVector.cpp
+   AIELivenessVector.cpp
    AIELegalizerHelper.cpp
    AIELiveRangeUtils.cpp
    AIELiveRegs.cpp
