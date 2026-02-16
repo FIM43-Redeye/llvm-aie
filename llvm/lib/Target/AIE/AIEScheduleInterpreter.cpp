@@ -180,8 +180,8 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
 
   // Build separate maps for register and bypass events per VReg.
   // Bypass events are derived from ForwardingClass:
-  // - Reads with ForwardingClass != 0 also read bypass one cycle earlier
-  // - Writes with ForwardingClass != 0 also write bypass at same cycle
+  // - Reads with ForwardingClass != 0 also read bypass at same cycle
+  // - Writes with ForwardingClass != 0 also write bypass one cycle earlier
   std::map<unsigned, std::map<unsigned, std::string>> RegEventsByVReg;
   std::map<unsigned, std::map<unsigned, std::string>> BypassEventsByVReg;
   for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
@@ -196,7 +196,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
       // If this event uses a bypass, add bypass event
       if (Event.ForwardingClass != 0) {
         const int BypassCycle =
-            (Event.Type == EventType::Read) ? Cycle - 1 : Cycle;
+            (Event.Type == EventType::Write) ? Cycle - 1 : Cycle;
         if (BypassCycle >= 0) {
           if (!BypassEventsByVReg[Event.VReg][BypassCycle].empty()) {
             BypassEventsByVReg[Event.VReg][BypassCycle] += " ";
@@ -317,14 +317,19 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
         // RF write occupies register file at ModuloCycle
         LiveLanesByVirtReg[Event.VReg][ModuloCycle] |= M;
 
-        // If this write uses a bypass, mark bypass write at same cycle
+        // If this write uses a bypass, mark bypass write one cycle earlier
         if (Event.ForwardingClass != 0) {
-          LiveLanesByVirtReg[Event.VReg][ModuloCycle].addBypassWrite(
-              Event.ForwardingClass);
+          const int BypassWriteCycle = C - 1;
+          if (BypassWriteCycle >= 0) {
+            const int BypassModuloCycle = BypassWriteCycle % II;
+            LiveLanesByVirtReg[Event.VReg][BypassModuloCycle].addBypassWrite(
+                Event.ForwardingClass);
 
-          LLVM_DEBUG(dbgs() << "    Bypass write of class "
-                            << Event.ForwardingClass << " at cycle " << C
-                            << " (offset " << ModuloCycle << ")\n");
+            LLVM_DEBUG(dbgs()
+                       << "    Bypass write of class " << Event.ForwardingClass
+                       << " at cycle " << BypassWriteCycle << " (offset "
+                       << BypassModuloCycle << ")\n");
+          }
         }
 
         // Kill those lanes going backward
@@ -360,22 +365,17 @@ AIEScheduleInterpreter::buildLiveLanes(const EventSchedule &Schedule,
                    << ":" << TRI.getSubRegIndexName(Event.SubRegIdx);
                    dbgs() << " lanes " << PrintLaneMask(M) << "\n");
 
-        // If this read uses a bypass, mark bypass read one cycle earlier
+        // If this read uses a bypass, mark bypass read at same cycle
         if (Event.ForwardingClass != 0) {
-          const int BypassReadCycle = C - 1;
-          if (BypassReadCycle >= 0) {
-            const int BypassModuloCycle = BypassReadCycle % II;
-            if (!LiveLanesByVirtReg.count(Event.VReg)) {
-              LiveLanesByVirtReg[Event.VReg] = AIE::LivenessVector(II);
-            }
-            LiveLanesByVirtReg[Event.VReg][BypassModuloCycle].addBypassRead(
-                Event.ForwardingClass);
-
-            LLVM_DEBUG(dbgs()
-                       << "    Bypass read of class " << Event.ForwardingClass
-                       << " at cycle " << BypassReadCycle << " (offset "
-                       << BypassModuloCycle << ")\n");
+          if (!LiveLanesByVirtReg.count(Event.VReg)) {
+            LiveLanesByVirtReg[Event.VReg] = AIE::LivenessVector(II);
           }
+          LiveLanesByVirtReg[Event.VReg][ModuloCycle].addBypassRead(
+              Event.ForwardingClass);
+
+          LLVM_DEBUG(dbgs() << "    Bypass read of class "
+                            << Event.ForwardingClass << " at cycle " << C
+                            << " (offset " << ModuloCycle << ")\n");
         }
       }
     }
@@ -441,10 +441,26 @@ void AIEScheduleInterpreter::dumpLiveLanes(
 
     const auto &LanesByOffset = LiveLanesByVirtReg.lookup(VReg);
     for (int T = 0; T < II; ++T) {
-      LaneBitmask Mask = LanesByOffset[T];
-      if (Mask.any()) {
-        // Show a simple indicator - could be enhanced to show actual lanes
-        OS << " ## ";
+      const AIE::Liveness &L = LanesByOffset[T];
+      if (L.any()) {
+        // Show indicator with bypass info
+        // Format: ## for lanes only, #R for lanes+bypass read,
+        // #W for lanes+bypass write, RW for both bypasses
+        std::string Indicator;
+        if (L.getLanes().any()) {
+          Indicator = "#";
+        }
+        if (!L.getBypassReads().empty()) {
+          Indicator += "R";
+        }
+        if (!L.getBypassWrites().empty()) {
+          Indicator += "W";
+        }
+        // Pad to 3 characters
+        while (Indicator.size() < 2) {
+          Indicator += "#";
+        }
+        OS << " " << Indicator << " ";
       } else {
         OS << " .. ";
       }
