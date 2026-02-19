@@ -73,27 +73,10 @@ public:
   /// Check if this liveness conflicts with another.
   /// Conflicts occur when:
   /// 1. Register file lanes overlap, OR
-  /// 2. A bypass read and bypass write use the same forwarding class
-  bool conflictsWith(const Liveness &Other) const {
-    // Check register file lane conflicts
-    if ((Lanes & Other.Lanes).any()) {
-      return true;
-    }
-
-    // Check bypass conflicts: read in one, write in other (same class)
-    for (unsigned ReadClass : BypassReads) {
-      if (llvm::is_contained(Other.BypassWrites, ReadClass)) {
-        return true;
-      }
-    }
-    for (unsigned WriteClass : BypassWrites) {
-      if (llvm::is_contained(Other.BypassReads, WriteClass)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
+  /// 2. A bypass read and bypass write use the same forwarding class, OR
+  /// 3. One has bypass activity and the other has register lanes
+  ///    (they share the same register address)
+  bool conflictsWith(const Liveness &Other) const;
 
   /// Union with another liveness
   Liveness &operator|=(const Liveness &Other) {

@@ -25,6 +25,41 @@ using namespace llvm;
 namespace llvm {
 namespace AIE {
 
+bool Liveness::conflictsWith(const Liveness &Other) const {
+  // Check register file lane conflicts.
+  if ((Lanes & Other.Lanes).any()) {
+    return true;
+  }
+
+  // Check bypass conflicts: read in one, write in other (same class).
+  for (unsigned ReadClass : BypassReads) {
+    if (llvm::is_contained(Other.BypassWrites, ReadClass)) {
+      return true;
+    }
+  }
+  for (unsigned WriteClass : BypassWrites) {
+    if (llvm::is_contained(Other.BypassReads, WriteClass)) {
+      return true;
+    }
+  }
+
+  // Check bypass vs register file conflicts.
+  // If one has bypass activity and the other has register lanes, they
+  // conflict because they share the same register address.
+  const bool ThisHasBypass = !BypassReads.empty() || !BypassWrites.empty();
+  const bool OtherHasBypass =
+      !Other.BypassReads.empty() || !Other.BypassWrites.empty();
+
+  if (ThisHasBypass && Other.Lanes.any()) {
+    return true;
+  }
+  if (OtherHasBypass && Lanes.any()) {
+    return true;
+  }
+
+  return false;
+}
+
 LivenessVector::LivenessVector(size_t Size) : Elements(Size) {}
 
 LivenessVector::LivenessVector(size_t Size, LaneBitmask InitialValue)
