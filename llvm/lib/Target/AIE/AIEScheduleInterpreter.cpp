@@ -208,14 +208,14 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   }
 
   // Print header with cycle numbers
-  OS << "VReg   |";
+  OS << " RC     VReg  |";
   for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
     OS << format(" %4d |", Cycle);
   }
   OS << "\n";
 
   // Print separator
-  OS << "-------+";
+  OS << "--------------+";
   for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
     OS << "------+";
   }
@@ -234,7 +234,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   for (unsigned VReg : AllVRegs) {
     auto Reg = Register::virtReg2Index(VReg);
     // Print register events
-    OS << format("%7s%6d |", TRI.getRegClassName(MRI.getRegClass(Reg)), VReg);
+    OS << format("%7s%6d |", TRI.getRegClassName(MRI.getRegClass(VReg)), Reg);
     PrintEventRow(RegEventsByVReg[VReg]);
 
     // Print bypass events if any exist for this VReg
