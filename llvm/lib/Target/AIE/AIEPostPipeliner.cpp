@@ -1841,14 +1841,16 @@ void PostPipeliner::materializePipeline(PipelineScheduleVisitor &Visitor) {
   // debugging insights.
   if (ForcedStageCount && NStages % ForcedStageCount == 0 &&
       NPrologueStages == NStages - 1) {
-    int Factor = NStages / ForcedStageCount;
+    // Fix the II, recompute ModuloCycle and Stage, fix stagecount and
+    // prologue stages count
+    const int Factor = NStages / ForcedStageCount;
     II *= Factor;
-    NStages = ForcedStageCount;
     for (int K = 0; K < NInstr; K++) {
       auto &Node = Info[K];
       Node.update(II);
     }
     NStages = ForcedStageCount;
+    NPrologueStages = NStages - 1;
   }
 
   visitPipelineSchedule(Visitor);
