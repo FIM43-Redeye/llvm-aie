@@ -763,7 +763,9 @@ void RegLiveRangeTracker::virtualizeFilteredPhysRegs() {
   // Clear the NoVRegs property.
   MF->getProperties().reset(MachineFunctionProperties::Property::NoVRegs);
 
-  for (RegLiveRange &LR : LiveRanges) {
+  // Create and rewrite virtual registers. Live ranges are created in reverse,
+  // so we run this loop in reverse order to make the dumps more intuitive.
+  for (RegLiveRange &LR : reverse(LiveRanges)) {
     // The analysis should have filtered out any live ranges without a valid
     // register class
     assert(LR.RegisterClass && "Live range must have a valid register class");
