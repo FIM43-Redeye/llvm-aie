@@ -413,7 +413,7 @@ void AIEScheduleInterpreter::dumpLiveLanes(
     return;
   }
 
-  // Collect and sort VRegs for consistent output
+  // Collect and sort VRegs for consistent output.
   SmallVector<unsigned, 16> VRegs;
   for (const auto &[VReg, _] : LiveLanesByVirtReg) {
     VRegs.push_back(VReg);
@@ -423,13 +423,13 @@ void AIEScheduleInterpreter::dumpLiveLanes(
   OS << "Live Lanes (II=" << II << "):\n";
   OS << "VReg   | ";
   for (int T = 0; T < II; ++T) {
-    OS << format("t%-2d ", T);
+    OS << format("t%-6d ", T);
   }
   OS << "\n";
 
   OS << "-------+";
   for (int T = 0; T < II; ++T) {
-    OS << "----";
+    OS << "--------";
   }
   OS << "\n";
 
@@ -440,26 +440,41 @@ void AIEScheduleInterpreter::dumpLiveLanes(
     for (int T = 0; T < II; ++T) {
       const AIE::Liveness &L = LanesByOffset[T];
       if (L.any()) {
-        // Show indicator with bypass info
-        // Format: ## for lanes only, #R for lanes+bypass read,
-        // #W for lanes+bypass write, RW for both bypasses
+        // Build indicator showing lanes and bypass classes.
+        // Format examples:
+        //   "##    " = lanes only
+        //   "#R1   " = lanes + bypass read class 1
+        //   "#W2   " = lanes + bypass write class 2
+        //   "R1W2  " = bypass read class 1 + bypass write class 2
+        //   "#R1W2 " = lanes + bypass read class 1 + bypass write class 2
         std::string Indicator;
         if (L.getLanes().any()) {
           Indicator = "#";
         }
+
+        // Add bypass read classes.
         if (!L.getBypassReads().empty()) {
           Indicator += "R";
+          for (unsigned FC : L.getBypassReads()) {
+            Indicator += std::to_string(FC);
+          }
         }
+
+        // Add bypass write classes.
         if (!L.getBypassWrites().empty()) {
           Indicator += "W";
+          for (unsigned FC : L.getBypassWrites()) {
+            Indicator += std::to_string(FC);
+          }
         }
-        // Pad to 3 characters
-        while (Indicator.size() < 2) {
-          Indicator += "#";
+
+        // Pad to 6 characters for alignment.
+        while (Indicator.size() < 6) {
+          Indicator += " ";
         }
         OS << " " << Indicator << " ";
       } else {
-        OS << " .. ";
+        OS << " ..     ";
       }
     }
     OS << "\n";
