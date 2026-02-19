@@ -163,7 +163,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   }
 
   // Helper lambda to format an event as a string
-  auto formatEvent = [](const RFEvent &Event) -> std::string {
+  auto FormatEvent = [](const RFEvent &Event) -> std::string {
     const char Action = (Event.Type == EventType::Read) ? 'R' : 'W';
     std::string ActionStr;
     if (Event.SubRegIdx != 0) {
@@ -191,7 +191,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
       if (!RegEventsByVReg[Event.VReg][Cycle].empty()) {
         RegEventsByVReg[Event.VReg][Cycle] += " ";
       }
-      RegEventsByVReg[Event.VReg][Cycle] += formatEvent(Event);
+      RegEventsByVReg[Event.VReg][Cycle] += FormatEvent(Event);
 
       // If this event uses a bypass, add bypass event
       if (Event.ForwardingClass != 0) {
@@ -201,7 +201,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
           if (!BypassEventsByVReg[Event.VReg][BypassCycle].empty()) {
             BypassEventsByVReg[Event.VReg][BypassCycle] += " ";
           }
-          BypassEventsByVReg[Event.VReg][BypassCycle] += formatEvent(Event);
+          BypassEventsByVReg[Event.VReg][BypassCycle] += FormatEvent(Event);
         }
       }
     }
@@ -222,29 +222,26 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   OS << "\n";
 
   // Helper lambda to print a row of events
-  auto printEventRow = [&](const std::map<unsigned, std::string> &Events) {
+  auto PrintEventRow = [&](const std::map<unsigned, std::string> &Events) {
     for (unsigned Cycle = 0; Cycle < Schedule.size(); ++Cycle) {
       auto It = Events.find(Cycle);
-      if (It != Events.end()) {
-        OS << format(" %-4s |", It->second.c_str());
-      } else {
-        OS << "      |";
-      }
+      OS << format(" %-4s |", It != Events.end() ? It->second.c_str() : "");
     }
     OS << "\n";
   };
 
   // Print each VReg with register events and bypass events on separate lines
   for (unsigned VReg : AllVRegs) {
+    auto Reg = Register::virtReg2Index(VReg);
     // Print register events
-    OS << format("%6d |", Register::virtReg2Index(VReg));
-    printEventRow(RegEventsByVReg[VReg]);
+    OS << format("%7s%6d |", TRI.getRegClassName(MRI.getRegClass(Reg)), Reg);
+    PrintEventRow(RegEventsByVReg[VReg]);
 
     // Print bypass events if any exist for this VReg
     const auto &BypassEvents = BypassEventsByVReg[VReg];
     if (!BypassEvents.empty()) {
-      OS << "   (b) |";
-      printEventRow(BypassEvents);
+      OS << "       bypass |";
+      PrintEventRow(BypassEvents);
     }
   }
 }
