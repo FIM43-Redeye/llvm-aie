@@ -234,7 +234,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
   for (unsigned VReg : AllVRegs) {
     auto Reg = Register::virtReg2Index(VReg);
     // Print register events
-    OS << format("%7s%6d |", TRI.getRegClassName(MRI.getRegClass(Reg)), Reg);
+    OS << format("%7s%6d |", TRI.getRegClassName(MRI.getRegClass(Reg)), VReg);
     PrintEventRow(RegEventsByVReg[VReg]);
 
     // Print bypass events if any exist for this VReg
