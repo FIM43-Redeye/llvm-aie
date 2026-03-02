@@ -196,6 +196,44 @@ bool assignSlots(SlotMapping &SlotToBanks, const MachineBasicBlock &MBB,
 }
 
 namespace {
+
+/// Separate FILL pseudo instructions from different FIFO streams into
+/// different load slots using round-robin assignment. This ensures FILL
+/// operations from independent streams land on complementary slots so the
+/// pipeliner can pack them into the same VLIW bundle.
+///
+/// \return true if FILL instructions from multiple streams were separated.
+bool separateFillStreams(MachineBasicBlock &MBB, const AIEBaseInstrInfo *TII) {
+  const AIEBaseMCFormats *Formats = TII->getFormatInterface();
+  // Collect FILL pseudos.
+  SmallVector<MachineInstr *, 4> Fills;
+  for (auto &MI : MBB) {
+    if (TII->isPseudoFillLoad(MI.getOpcode()))
+      Fills.push_back(&MI);
+  }
+
+  if (Fills.size() < 2)
+    return false;
+
+  LLVM_DEBUG(dbgs() << "Separating " << Fills.size()
+                    << " FILL streams into different load slots\n");
+
+  // Round-robin over each FILL's own alternatives so that consecutive
+  // FILLs land on complementary slots.
+  unsigned SlotIdx = 0;
+  for (auto *Fill : Fills) {
+    const auto *Alts = Formats->getAlternateInstsOpcode(Fill->getOpcode());
+    if (!Alts || Alts->size() < 2)
+      continue;
+    const unsigned AltOpcode = (*Alts)[SlotIdx++ % Alts->size()];
+    LLVM_DEBUG(dbgs() << "Materializing FILL: " << *Fill);
+    Fill->setDesc(TII->get(AltOpcode));
+    LLVM_DEBUG(dbgs() << "             to: " << *Fill);
+  }
+
+  return true;
+}
+
 void materializeMSP(MachineInstr *MSP, SlotStatistics &Statistics,
                     const AIEBaseInstrInfo *TII) {
 
@@ -319,6 +357,11 @@ void staticallyMaterializeMultiSlotInstructions(MachineBasicBlock &MBB,
     LLVM_DEBUG(
         dbgs()
         << "Could not find slot assignments, skipping bank materialization\n");
+    // Separate FILL instructions from different FIFO streams into different
+    // slots. Remaining POP pseudos are left for the pipeliner to assign
+    // dynamically, which produces better slot balance than the greedy
+    // fallback.
+    separateFillStreams(MBB, TII);
   }
 
   if (MaterializeAll) {

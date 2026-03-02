@@ -174,6 +174,8 @@ protected:
                            MachineInstr &MI) const override;
   AIERegOffsetSpillInstrInfo
   getRegOffsetSpillInstrInfoFromImmOffset(const unsigned Opcode) const override;
+
+  bool isPseudoFillLoad(unsigned Opc) const override;
 };
 } // namespace llvm
 #endif

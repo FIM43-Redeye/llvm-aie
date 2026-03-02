@@ -307,6 +307,10 @@ bool AIE2PInstrInfo::isFifoStoreConvOpcode(unsigned Opcode) const {
           (Opcode == AIE2P::VST_PUSH_576_CONV_bfp16ebs8_fp32));
 }
 
+bool AIE2PInstrInfo::isPseudoFillLoad(unsigned Opc) const {
+  return Opc == AIE2P::VLD_FILL_512_pseudo;
+}
+
 std::optional<unsigned>
 AIE2PInstrInfo::getStoreFlushConvOpcode(unsigned StoreFlushOpcode) const {
   switch (StoreFlushOpcode) {

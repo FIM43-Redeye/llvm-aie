@@ -169,6 +169,12 @@ struct AIEBaseInstrInfo : public TargetInstrInfo {
   /// \return wether \p MI is a multi-slot pseudo instruction
   bool isMultiSlotPseudo(const MachineInstr &MI) const;
 
+  /// \return whether \p Opc is a multi-slot pseudo FIFO fill load instruction.
+  /// Fill pseudos are expected to have alternatives in at least two different
+  /// load slots so that the multi-slot materializer can separate independent
+  /// streams onto complementary slots via round-robin assignment.
+  virtual bool isPseudoFillLoad(unsigned Opc) const { return false; }
+
   /// Return the opcode for smallest nop
   virtual unsigned getNopOpcode() const {
     llvm_unreachable("Target didn't implement getNopOpcode");

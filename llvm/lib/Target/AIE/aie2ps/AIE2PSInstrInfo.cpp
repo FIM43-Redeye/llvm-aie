@@ -816,6 +816,10 @@ AIE2PSInstrInfo::getDoneLatency(const unsigned Opc) const {
   return (Opc == AIE2PS::DONE) ? std::optional<unsigned>(6) : std::nullopt;
 }
 
+bool AIE2PSInstrInfo::isPseudoFillLoad(unsigned Opc) const {
+  return Opc == AIE2PS::VLD_FILL_512_pseudo;
+}
+
 unsigned AIE2PSInstrInfo::getCallOpcode(const MachineFunction &CallerF,
                                         bool IsIndirect,
                                         bool IsTailCall) const {
