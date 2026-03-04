@@ -67,9 +67,10 @@ static cl::opt<bool> EnableMultiSlotInstrMaterialization(
     cl::desc("Statically materialize Multi-Slot Pseudo Instructions in "
              "loops."));
 
-static cl::opt<bool>
-    MaterializeAll("aie-materialize-all", cl::Hidden, cl::init(true),
-                   cl::desc("Materialize all Multi-Slot Pseudo Instructions."));
+static cl::opt<bool> MaterializePipeline(
+    "aie-materialize-pipeline", cl::Hidden, cl::init(true),
+    cl::desc("Materialize all Multi-Slot Pseudo Instructions in "
+             "post-pipeline candidate loops."));
 
 static cl::opt<int> PostPipelinerMaxTryII(
     "aie-postpipeliner-maxtry-ii", cl::init(20),
@@ -1041,10 +1042,9 @@ int InterBlockScheduling::getCyclesToAvoidResourceConflicts(
     ++NopCounter;
   }
 
-  DEBUG_LOOPAWARE(dbgs() << "Resource conflict avoidance between"
-                         << " loop: " << *LoopMBB
-                         << " And epilogue: " << EpilogueMBB << " Requires "
-                         << NopCounter << " Nops\n");
+  DEBUG_LOOPAWARE(dbgs() << "Resource conflict avoidance between" << " loop: "
+                         << *LoopMBB << " And epilogue: " << EpilogueMBB
+                         << " Requires " << NopCounter << " Nops\n");
 
   return NopCounter;
 }
@@ -1192,7 +1192,8 @@ void BlockState::initInterBlock(const MachineSchedContext &Context,
     // perform static assignment of multi-slot pseudos
     if (EnableMultiSlotInstrMaterialization &&
         PostSWP->isPostPipelineCandidate(*TheBlock)) {
-      staticallyMaterializeMultiSlotInstructions(*TheBlock, HR, MaterializeAll);
+      staticallyMaterializeMultiSlotInstructions(*TheBlock, HR,
+                                                 MaterializePipeline);
     }
   }
 
