@@ -17,6 +17,7 @@
 #include "AIEHazardRecognizer.h"
 #include "AIESlotStatistics.h"
 #include "AIESlotUtils.h"
+#include "Utils/AIELoopUtils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -286,6 +287,33 @@ void materializeMSP(MachineInstr *MSP, SlotStatistics &Statistics,
 void materializeToMinimizeSlotTotals(MachineBasicBlock &MBB,
                                      const AIEBaseInstrInfo *TII) {
   SlotStatistics Statistics = computeSlotStatistics(MBB, TII);
+
+  // Two-stage preheader-aware materialization:
+  // Stage 1: Add preheader Fixed pressure (e.g. VLDA-only bm spill reloads)
+  //          to bias initial MSP assignments toward the less-pressured slot.
+  // Stage 2: Once the combined load slot pressure balances, remove the
+  //          preheader contribution so remaining MSPs balance for loop body II.
+  const AIEBaseMCFormats *Formats = TII->getFormatInterface();
+  const SmallVector<MCSlotKind, 2> LoadSlots = Formats->getLoadSlotKinds();
+  SlotCounts PreheaderFixed;
+  bool PreheaderApplied = false;
+  if (LoadSlots.size() >= 2) {
+    if (const auto *Preheader =
+            AIELoopUtils::getDedicatedFallThroughPreheader(MBB)) {
+      const SlotStatistics PreheaderStats = computeSlotStatistics(
+          const_cast<MachineBasicBlock &>(*Preheader), TII);
+      // Only carry over the load slot pressure from the preheader.
+      // Non-load slots (ALU, Lng, etc.) should not bias MOV/other
+      // pseudo materialization decisions.
+      for (const MCSlotKind Slot : LoadSlots)
+        PreheaderFixed[static_cast<int>(Slot)] =
+            PreheaderStats.Fixed.at(static_cast<int>(Slot));
+      LLVM_DEBUG(dbgs() << "Preheader Fixed:\n  " << PreheaderFixed << "\n");
+      Statistics.Fixed += PreheaderFixed;
+      PreheaderApplied = true;
+    }
+  }
+
   // Sort the list by increasing alternative count
   llvm::sort(Statistics.MSPs, [Formats = TII->getFormatInterface()](
                                   MachineInstr *A, MachineInstr *B) {
@@ -302,6 +330,19 @@ void materializeToMinimizeSlotTotals(MachineBasicBlock &MBB,
   // based on the current total slotcounts.
   for (auto *MSP : Statistics.MSPs) {
     materializeMSP(MSP, Statistics, TII);
+
+    // Transition from Stage 1 to Stage 2: once the combined load slot
+    // Fixed counts have balanced, remove the preheader contribution so
+    // remaining MSPs balance for loop body II alone.
+    if (PreheaderApplied) {
+      const int SlotA = static_cast<int>(LoadSlots[0]);
+      const int SlotB = static_cast<int>(LoadSlots[1]);
+      if (Statistics.Fixed.at(SlotA) >= Statistics.Fixed.at(SlotB)) {
+        LLVM_DEBUG(dbgs() << "Load slots balanced, removing preheader bias\n");
+        Statistics.Fixed -= PreheaderFixed;
+        PreheaderApplied = false;
+      }
+    }
   }
 }
 
@@ -340,9 +381,9 @@ void materializeSlots(const SlotMapping &SlotToBanks, MachineBasicBlock &MBB,
   }
 }
 
-void staticallyMaterializeMultiSlotInstructions(
-    MachineBasicBlock &MBB, const AIEHazardRecognizer &HR,
-    bool MaterializePipeline) {
+void staticallyMaterializeMultiSlotInstructions(MachineBasicBlock &MBB,
+                                                const AIEHazardRecognizer &HR,
+                                                bool MaterializePipeline) {
   LLVM_DEBUG(dbgs() << "Statically Assigning multi slot pseudos for "
                     << MBB.getName() << "\n");
 
