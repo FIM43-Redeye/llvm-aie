@@ -423,10 +423,24 @@ bool AIELegalizerHelper::legalizeG_SEXT_INREG(LegalizerHelper &Helper,
   MachineRegisterInfo &MRI = *MIRBuilder.getMRI();
 
   const Register DestReg = MI.getOperand(0).getReg();
+  const Register SrcReg = MI.getOperand(1).getReg();
   const LLT DestRegTy = MRI.getType(DestReg);
   const LLT S32 = LLT::scalar(32);
 
   const int64_t Imm = MI.getOperand(2).getImm();
+
+  // Handle s1 -> s32 sign extension using G_SELECT
+  if (Imm == 1 && DestRegTy == S32) {
+    const Register Zero =
+        MIRBuilder.buildConstant(S32, 0)->getOperand(0).getReg();
+    const Register NegOne =
+        MIRBuilder.buildConstant(S32, -1)->getOperand(0).getReg();
+    MIRBuilder.buildSelect(DestReg, SrcReg, NegOne, Zero);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  // For other cases (Imm == 8 or 16), use default lowering
   if ((Imm != 8 && Imm != 16) || DestRegTy != S32)
     Helper.lowerSextInreg(MI);
 
