@@ -55,8 +55,10 @@ static cl::opt<bool>
                              cl::desc("Recognize pointer hazards"));
 
 const AIEBaseMCFormats *FuncUnitWrapper::FormatInterface = nullptr;
+const char *FuncUnitWrapper::SlotLetters = nullptr;
 void FuncUnitWrapper::setFormatInterface(const AIEBaseMCFormats *Formats) {
   FormatInterface = Formats;
+  SlotLetters = Formats ? Formats->getSlotLetters() : nullptr;
 }
 
 bool FuncUnitWrapper::operator==(const FuncUnitWrapper &Other) const {
@@ -81,9 +83,17 @@ void FuncUnitWrapper::dump() const {
     for (int J = 9; J >= 0; J--)
       dbgs() << ((Resource & (1ULL << J)) ? Digits[J] : '-');
   };
+  auto PrintSlots = [&](const std::string &ResourceName, uint64_t Resource) {
+    dbgs() << ResourceName;
+    for (int J = 9; J >= 0; J--)
+      dbgs() << ((Resource & (1ULL << J)) ? SlotLetters[J] : '-');
+  };
 
   PrintFU("Req     : ", Required);
-  PrintResource(" Slots : ", Slots);
+  if (SlotLetters)
+    PrintSlots(" Slots : ", Slots);
+  else
+    PrintResource(" Slots : ", Slots);
   PrintResource(" Memorybanks : ", MemoryBanks);
   PrintResource(" MemObjectsBits : ", MemObjectsBits);
   if (Reserved.empty())

@@ -101,6 +101,7 @@ class MockMCFormats : public AIEBaseMCFormats {
   const MCFormatDesc *getMCFormats() const override {
     llvm_unreachable("Un-implemented");
   }
+  const char *getSlotLetters() const override { return "XABLMNSV"; }
   ArrayRef<bool> getIsFormatAvailable() const override {
     return FormatAvailable;
   }

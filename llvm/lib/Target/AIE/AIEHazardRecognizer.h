@@ -64,6 +64,8 @@ using ResourceSet = StaticBitSet<TotalNumResources>;
 class FuncUnitWrapper {
   /// The format interface to interpret bundle constraints
   static const AIEBaseMCFormats *FormatInterface;
+  /// Architecture-specific single-letter abbreviations for slots
+  static const char *SlotLetters;
 
   /// Bitset of the required resources
   ResourceSet Required;

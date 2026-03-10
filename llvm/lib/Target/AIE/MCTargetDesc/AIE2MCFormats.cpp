@@ -33,6 +33,9 @@ const MCFormatDesc *AIE2MCFormats::getMCFormats() const {
   return AIE2::Formats;
 }
 
+// Slots sorted by name: Alu, Lda, Ldb, Lng, Mv, Nop, St, Vec
+const char *AIE2MCFormats::getSlotLetters() const { return "XABLMNSV"; }
+
 const PacketFormats &AIE2MCFormats::getPacketFormats() const { return Formats; }
 
 ArrayRef<bool> AIE2MCFormats::getIsFormatAvailable() const {

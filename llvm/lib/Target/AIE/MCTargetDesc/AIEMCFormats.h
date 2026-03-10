@@ -390,6 +390,8 @@ public:
 
   virtual const MCSlotInfo *getSlotInfo(const MCSlotKind Kind) const = 0;
 
+  virtual const char *getSlotLetters() const = 0;
+
   virtual const MCFormatDesc *getMCFormats() const = 0;
 
   virtual const PacketFormats &getPacketFormats() const = 0;
@@ -415,6 +417,7 @@ public:
   std::optional<unsigned int>
   getFormatDescIndex(unsigned int Opcode) const override;
   const MCSlotInfo *getSlotInfo(const MCSlotKind Kind) const override;
+  const char *getSlotLetters() const override;
   const MCFormatDesc *getMCFormats() const override;
   ArrayRef<bool> getIsFormatAvailable() const override;
   const PacketFormats &getPacketFormats() const override;
@@ -427,6 +430,7 @@ public:
   std::optional<unsigned int>
   getFormatDescIndex(unsigned int Opcode) const override;
   const MCSlotInfo *getSlotInfo(const MCSlotKind Kind) const override;
+  const char *getSlotLetters() const override;
   const MCFormatDesc *getMCFormats() const override;
   const PacketFormats &getPacketFormats() const override;
   ArrayRef<bool> getIsFormatAvailable() const override;
@@ -440,6 +444,7 @@ public:
   std::optional<unsigned int>
   getFormatDescIndex(unsigned int Opcode) const override;
   const MCSlotInfo *getSlotInfo(const MCSlotKind Kind) const override;
+  const char *getSlotLetters() const override;
   const MCFormatDesc *getMCFormats() const override;
   const PacketFormats &getPacketFormats() const override;
   ArrayRef<bool> getIsFormatAvailable() const override;
@@ -453,6 +458,7 @@ public:
   std::optional<unsigned int>
   getFormatDescIndex(unsigned int Opcode) const override;
   const MCSlotInfo *getSlotInfo(const MCSlotKind Kind) const override;
+  const char *getSlotLetters() const override;
   const MCFormatDesc *getMCFormats() const override;
   const PacketFormats &getPacketFormats() const override;
   ArrayRef<bool> getIsFormatAvailable() const override;
