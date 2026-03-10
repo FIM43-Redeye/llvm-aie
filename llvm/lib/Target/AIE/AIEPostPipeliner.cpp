@@ -65,6 +65,8 @@ std::optional<int> PostPipelinerStrategy::fitInInterval(
     if (!HR.checkConflict(Scoreboard, MI, Mod)) {
       return C;
     }
+    LLVM_DEBUG(dbgs() << "    Resource conflict at modulo cycle " << Mod
+                      << "\n");
   }
 
   return std::nullopt;
