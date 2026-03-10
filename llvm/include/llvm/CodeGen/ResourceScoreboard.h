@@ -165,7 +165,7 @@ public:
   }
 
   // Print the full scoreboard .
-  void dumpFull() const {
+  void dumpFull(int II = 0) const {
     int First = firstOccupied();
     int Last = lastOccupied();
     for (int C = First; C <= Last; C++) {
@@ -176,6 +176,8 @@ public:
       dbgs() << "\t";
       Cycle.dump();
       dbgs() << "\n";
+      if (II > 0 && C % II == II - 1)
+        dbgs() << "\n";
     }
   }
 
