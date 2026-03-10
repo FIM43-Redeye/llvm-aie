@@ -1213,13 +1213,20 @@ static const ConfigStrategy::Configuration Heuristics[] = {
 
 bool PostPipeliner::tryApproaches() {
   DEBUG_SUMMARY(dbgs() << "-- MinLength=" << MinLength << "\n");
+  const char *Letters = TII->getFormatInterface()->getSlotLetters();
+  SmallSet<int, 3> DumpedLengths;
+  DumpedLengths.insert(MinLength);
   int HeuristicIndex = 0;
   for (const auto &Config : Heuristics) {
     if (Heuristic >= 0 && Heuristic != HeuristicIndex++) {
       continue;
     }
-    ConfigStrategy S(*DAG, Info, MinLength + Config.ExtraStages * II,
-                     Config.TopDown, Config.Alternate, Config.Components);
+    int StrategyLength = MinLength + Config.ExtraStages * II;
+    if (DumpedLengths.insert(StrategyLength).second) {
+      DEBUG_SUMMARY(dumpIntervals(Info, StrategyLength, II, Letters));
+    }
+    ConfigStrategy S(*DAG, Info, StrategyLength, Config.TopDown,
+                     Config.Alternate, Config.Components);
     resetSchedule(/*FullReset=*/true);
     for (int Run = 0; Run < Config.Runs && Run < HeuristicRuns; Run++) {
       DEBUG_SUMMARY(dbgs() << "--- Strategy " << S.name() << " run=" << Run
@@ -1238,7 +1245,11 @@ bool PostPipeliner::tryApproaches() {
     }
     DEBUG_SUMMARY(dbgs() << "    Strategy " << S.name() << " failed\n");
   }
-  IterCountSlackStrategy Relaxed(*DAG, Info, MinLength + II);
+  int RelaxedLength = MinLength + II;
+  if (DumpedLengths.insert(RelaxedLength).second) {
+    DEBUG_SUMMARY(dumpIntervals(Info, RelaxedLength, II, Letters));
+  }
+  IterCountSlackStrategy Relaxed(*DAG, Info, RelaxedLength);
   resetSchedule(/*FullReset=*/true);
   if (scheduleWithStrategy(Relaxed)) {
     return true;
