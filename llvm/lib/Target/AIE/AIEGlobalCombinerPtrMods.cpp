@@ -430,7 +430,28 @@ bool OffsetCombiner::isReorderCandidate(
   }
 
   // OffsetCombiner occurs after PostIncCombiner
-  return InsertionPointNodeNum > PostIncCombiner->InsertionPointNodeNum;
+  if (InsertionPointNodeNum <= PostIncCombiner->InsertionPointNodeNum)
+    return false;
+
+  // Reordering will move this OffsetCombiner's InsertionPoint up to the
+  // PostIncCombiner's InsertionPoint (see copyInsertionPoint, called from
+  // AIEGlobalCombiner::reorderCombinerInsertions). The combined load is then
+  // emitted at that new, earlier position. Refuse the reorder if any
+  // intervening instruction is an ordering barrier per
+  // TargetInstrInfo::isGlobalMemoryObject -- the same predicate
+  // ScheduleDAGInstrs::buildEdges uses to identify barrier candidates. This
+  // covers calls, instructions with unmodeled side effects (e.g. the
+  // aie2.acquire / aie2.release lock intrinsics), and ordered memory
+  // references; moving a load past any of them would violate the program's
+  // memory ordering constraints.
+  const MachineInstr *NewIP = PostIncCombiner->CombinerData.InsertionPoint;
+  const MachineInstr *OldIP = CombinerData.InsertionPoint;
+  for (auto It = std::next(NewIP->getIterator()); It != OldIP->getIterator();
+       ++It) {
+    if (TII->isGlobalMemoryObject(&*It))
+      return false;
+  }
+  return true;
 }
 
 // -------------------------- PostIncCombiner --------------------------------//
