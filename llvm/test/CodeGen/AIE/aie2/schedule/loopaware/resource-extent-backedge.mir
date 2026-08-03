@@ -1,0 +1,153 @@
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
+
+# RUN: llc --mtriple=aie2 --run-pass=postmisched %s -o - | FileCheck %s
+
+# A loop's outstanding resource cycles must be consumed before its backedge.
+# This schedule converges with ResourceExtent=4, which is currently emitted as
+# epilogue padding even though the epilogue cannot protect another iteration.
+--- |
+  source_filename = "resource-extent-backedge.mir"
+  target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32"
+  target triple = "aie2"
+
+  ; Function Attrs: mustprogress nofree norecurse nosync nounwind memory(argmem: write)
+  define dso_local void @fuzz_kernel(ptr noalias readnone captures(none) %in, ptr noalias writeonly captures(none) %out) local_unnamed_addr #0 {
+  entry:
+    call void @llvm.set.loop.iterations.i32(i32 32)
+    br label %for.body
+
+  for.cond.cleanup:                                 ; preds = %for.body
+    ret void
+
+  for.body:                                         ; preds = %for.body, %entry
+    %i.05 = phi i32 [ 0, %entry ], [ %inc.3, %for.body ]
+    %mul = mul nuw nsw i32 %i.05, %i.05
+    %conv = trunc i32 %mul to i8
+    %0 = trunc nuw i32 %i.05 to i20
+    %arrayidx = getelementptr inbounds nuw i8, ptr %out, i20 %0
+    store i8 %conv, ptr %arrayidx, align 1, !tbaa !2
+    %1 = add i32 %i.05, 1
+    %mul.1 = mul nuw nsw i32 %1, %1
+    %conv.1 = trunc i32 %mul.1 to i8
+    %2 = trunc nuw i32 %1 to i20
+    %arrayidx.1 = getelementptr inbounds nuw i8, ptr %out, i20 %2
+    store i8 %conv.1, ptr %arrayidx.1, align 1, !tbaa !2
+    %3 = add i32 %i.05, 2
+    %mul.2 = mul nuw nsw i32 %3, %3
+    %conv.2 = trunc i32 %mul.2 to i8
+    %4 = trunc nuw i32 %3 to i20
+    %arrayidx.2 = getelementptr inbounds nuw i8, ptr %out, i20 %4
+    store i8 %conv.2, ptr %arrayidx.2, align 1, !tbaa !2
+    %5 = add i32 %i.05, 3
+    %mul.3 = mul nuw nsw i32 %5, %5
+    %conv.3 = trunc i32 %mul.3 to i8
+    %6 = trunc nuw i32 %5 to i20
+    %arrayidx.3 = getelementptr inbounds nuw i8, ptr %out, i20 %6
+    store i8 %conv.3, ptr %arrayidx.3, align 1, !tbaa !2
+    %inc.3 = add nuw nsw i32 %i.05, 4
+    %7 = call i1 @llvm.loop.decrement.i32(i32 1)
+    br i1 %7, label %for.body, label %for.cond.cleanup, !llvm.loop !5
+  }
+
+  ; Function Attrs: nocallback noduplicate nofree nosync nounwind willreturn
+  declare void @llvm.set.loop.iterations.i32(i32) #1
+
+  ; Function Attrs: nocallback noduplicate nofree nosync nounwind willreturn
+  declare i1 @llvm.loop.decrement.i32(i32) #1
+
+  attributes #0 = { mustprogress nofree norecurse nosync nounwind memory(argmem: write) "no-builtin-memcpy" "no-builtin-memmove" "no-builtin-memset" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+  attributes #1 = { nocallback noduplicate nofree nosync nounwind willreturn }
+
+  !2 = !{!3, !3, i64 0}
+  !3 = !{!"omnipotent char", !4, i64 0}
+  !4 = !{!"Simple C++ TBAA"}
+  !5 = distinct !{!5, !6, !7}
+  !6 = !{!"llvm.loop.mustprogress"}
+  !7 = !{!"llvm.loop.itercount.range", i32 32}
+...
+---
+name:            fuzz_kernel
+alignment:       16
+exposesReturnsTwice: false
+legalized:       true
+regBankSelected: true
+selected:        true
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+hasFakeUses:     false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHContTarget: false
+hasEHScopes:     false
+hasEHFunclets:   false
+isOutlined:      false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: true
+registers:       []
+liveins:         []
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:     false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  isCalleeSavedInfoValid: false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+entry_values:    []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo:
+  varArgsFrameIndex: 0
+body:             |
+  ; CHECK-LABEL: name: fuzz_kernel
+  ; CHECK: ST_S8_ag_idx {{.*}}%ir.arrayidx.3
+  ; CHECK-NEXT: NOP
+  ; CHECK-NEXT: NOP
+  ; CHECK-NEXT: NOP
+  ; CHECK-NEXT: NOP
+  ; CHECK: PseudoLoopEnd
+  bb.0:
+    successors: %bb.1(0x80000000)
+    liveins: $p0, $p1
+
+    $lc = ADD_NC undef $r1, 0
+
+  bb.1.for.body:
+    successors: %bb.1(0x7c000000), %bb.2(0x04000000)
+    liveins: $p1, $r0
+
+    $dj0 = MOV_mv_scl undef $r0
+    ST_S8_ag_idx killed undef renamable $r1, undef renamable $p1, killed undef renamable $dj0 :: (store (s8) into %ir.arrayidx, !tbaa !2)
+    ST_S8_ag_idx killed undef renamable $r2, undef renamable $p1, killed undef renamable $dj0 :: (store (s8), !tbaa !2)
+    ST_S8_ag_idx killed undef renamable $r2, undef renamable $p1, killed undef renamable $dj0 :: (store (s8), !tbaa !2)
+    ST_S8_ag_idx killed undef renamable $r2, undef renamable $p1, killed undef renamable $dj0 :: (store (s8) into %ir.arrayidx.3, !tbaa !2)
+    PseudoLoopEnd <mcsymbol .L_LEnd0>, %bb.1
+
+  bb.2:
+...
