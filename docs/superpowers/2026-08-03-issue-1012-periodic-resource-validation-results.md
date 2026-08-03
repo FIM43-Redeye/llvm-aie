@@ -49,7 +49,7 @@ cycle 11. The next iteration's `MOVS` also used `R_RS_PORT` at cycle 11. The
 new periodic check exposes that modeled conflict, so the generated expectation
 was updated.
 
-## Original kernel artifact
+## Original kernel and Phoenix hardware validation
 
 The original issue kernel was rebuilt with the fixed compiler on `halo`.
 The resulting loop uses `II=29`, with stores at cycles 1, 9, 16, and 23 and an
@@ -62,10 +62,25 @@ Local artifacts:
 - `/tmp/issue1012-periodic-fix-2026-08-03/issue1012-fixed-fuzz_kernel.disasm`
 - `/tmp/issue1012-periodic-fix-2026-08-03/issue1012-fixed-fuzz_kernel.remarks`
 - `/tmp/issue1012-periodic-fix-2026-08-03/issue1012-fixed-fuzz_kernel.opt.yaml`
+- `/tmp/issue1012-periodic-fix-2026-08-03/hw-run/aie-fixed.xclbin`
+- `/tmp/issue1012-periodic-fix-2026-08-03/hw-run/insts-fixed.bin`
 
-The Phoenix run is still pending because `/dev/accel/accel0` is absent and
-`xrt-smi examine` currently reports zero devices. The fixed object is ready to
-package and run when the NPU returns.
+The Phoenix NPU was visible from the host as `RyzenAI-npu1`, architecture
+`aie2`, with firmware `1.5.5.391`. A controlled A/B used the same generated
+MLIR harness, inputs, `aiecc` packaging command, and `npu_runner`; only the
+linked kernel object differed:
+
+- The known-buggy object (`70eea335...`) reproduced 31 wrong elements out of
+  128. They were exactly indices `i % 4 == 3` through 123, and every wrong
+  value was zero.
+- The fixed object (`22156ec6...`) produced 0 wrong elements out of 128 in five
+  runs, including a final run after the failing baseline. All five output files
+  were byte-identical.
+
+The silicon result therefore confirms that the object produced with periodic
+resource validation avoids the reported store loss on the tested Phoenix
+device. The scheduler tests remain the evidence that the accounting change is
+general rather than a kernel-specific workaround.
 
 ## Local commits
 
