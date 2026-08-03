@@ -5,10 +5,15 @@
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 
 # RUN: llc --mtriple=aie2 --run-pass=postmisched %s -o - | FileCheck %s
+# RUN: llc --mtriple=aie2 --run-pass=postmisched %s -o /dev/null \
+# RUN:   --aie-postpipeliner-minii=23 --aie-postpipeliner-maxtry-ii=6 \
+# RUN:   -pass-remarks-output=- -pass-remarks-filter=pipeliner | \
+# RUN:   FileCheck %s --check-prefix=REMARK
 
-# A loop's outstanding resource cycles must be consumed before its backedge.
-# This schedule converges with ResourceExtent=4, which is currently emitted as
-# epilogue padding even though the epilogue cannot protect another iteration.
+# Four part-word stores reserve PART_WORD_STORE for seven cycles each, making
+# II=28 the minimum legal periodic schedule. At II=23, the stores at modulo
+# cycles 22 and 1 are only two cycles apart across the wrap. The postpipeliner
+# used to miss that conflict when NStages was one.
 --- |
   source_filename = "resource-extent-backedge.mir"
   target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32"
@@ -125,13 +130,17 @@ constants:       []
 machineFunctionInfo:
   varArgsFrameIndex: 0
 body:             |
+  ; REMARK:      - String:          Schedule found
+  ; REMARK-NEXT: - Pipeliner:       postpipeliner
+  ; REMARK-NEXT: - II:              '28'
   ; CHECK-LABEL: name: fuzz_kernel
   ; CHECK: ST_S8_ag_idx {{.*}}%ir.arrayidx.3
   ; CHECK-NEXT: NOP
   ; CHECK-NEXT: NOP
   ; CHECK-NEXT: NOP
   ; CHECK-NEXT: NOP
-  ; CHECK: PseudoLoopEnd
+  ; CHECK-NEXT: NOP
+  ; CHECK-NEXT: PseudoLoopEnd
   bb.0:
     successors: %bb.1(0x80000000)
     liveins: $p0, $p1

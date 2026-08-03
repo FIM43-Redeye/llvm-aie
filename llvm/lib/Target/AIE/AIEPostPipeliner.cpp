@@ -1040,12 +1040,15 @@ bool PostPipeliner::scheduleOtherIterations(PostPipelinerStrategy &Strategy) {
     scheduleNode(SU, Insert, Strategy);
   }
 
-  // Make a final check on the resources. We bring a pristine scoreboard
-  // to steady state by checking and inserting NStages. Since the steady
-  // state is the busiest, we can shift the scoreboard by II after each stage.
+  // Make a final check on the resources. Replay enough periods for the
+  // pristine scoreboard to reach steady state, including the wrap to the next
+  // period. NStages alone is insufficient when the schedule has one stage.
   ResourceScoreboard<FuncUnitWrapper> Resources;
-  Resources.config(0, II + HR.getPipelineDepth());
-  for (int S = 0; S < NStages; S++) {
+  const int PipelineDepth = HR.getPipelineDepth();
+  const int ResourcePeriods =
+      std::max(NStages, (PipelineDepth + II - 1) / II + 1);
+  Resources.config(0, II + PipelineDepth);
+  for (int S = 0; S < ResourcePeriods; S++) {
     for (int I = 0; I < NInstr; I++) {
       SUnit &SU = DAG->SUnits[I];
       MachineInstr &MI = *SU.getInstr();
